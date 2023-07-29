@@ -3,6 +3,14 @@
 $config = [];
 error_reporting(E_ERROR);
 
+function escapeFilename($filename) {
+#  $filename = str_replace(" ","%20",$filename);
+#  $filename = str_replace("(","\(",$filename);
+#  $filename = str_replace(")","\)",$filename);
+#  $filename = str_replace("#","\#",$filename);
+  return $filename;
+}
+
 function rrmdir($dir) {
    if (is_dir($dir)) {
      $objects = scandir($dir);
@@ -38,6 +46,104 @@ function findDerbyDir($crawlDir) {
   return $str;
 }
 
+function randomName() {
+    $alphabet = "abcdefghijklmnopqrstuwxyzABCDEFGHIJKLMNOPQRSTUWXYZ0123456789";
+    $pass = '';
+    for ($i = 0; $i < 8; $i++) {
+        $n = rand(0, strlen($alphabet)-1);
+        $pass = $pass . substr($alphabet,$n,1);
+    }
+    return $pass;
+}
+
+function setupKNIMEWorkflow($frogDir,$knimeDir) {
+  if (file_exists("tmp/tmp.tmp")) {
+    $dir = randomName();
+    $oldDir = getcwd();
+    chdir("tmp");
+    shell_exec("unzip tmp.tmp -d " . $dir . "/");
+    chdir($dir);
+    $setupvars = [];
+    $setupdata = [];
+    $setupfile = file_get_contents("setup.ini");
+    $lines = explode("\n",$setupfile);
+    foreach($lines as $line) $setupdata[] = explode(":",$line); 
+    foreach($setupdata as $line) if (strpos($line[0], '{%') !== false) {
+      $e = explode("=",$line[0]);
+      echo($e[0] . ": ");
+      if ($line[1] == 'SFLOOKUP') {
+	$var = [];
+        $var['name'] = $e[0];
+	$var['var'] = $e[1];
+        $var['value'] = getCrawlStr($frogDir);
+	$var['changes'] = escapeFilename($line[2]);
+        $setupvars[] = $var;
+      } else {
+	$var = [];
+        $var['name'] = $e[0];
+        $var['var'] = $e[1];
+        $var['value'] = trim(fgets(STDIN));
+        $var['changes'] = escapeFilename($line[2]);
+        $setupvars[] = $var;
+      }
+      echo("\n");
+    }
+    $projectname = '';
+    foreach($setupvars as $var) {
+      if ($var["changes"] != '') {
+        if (file_exists($var["changes"])) {
+          $dat = file_get_contents($var["changes"]);
+	  $dat = str_replace($var["var"],$var["value"],$dat);
+	  file_put_contents($var["changes"],$dat);
+        } else echo("file not found: " . $var["changes"] . "\n");
+      }
+      if ($var["name"] == "Projektname") $projectname = $var["value"];
+    }
+    chdir("..");
+    rename($dir,$knimeDir . "/" . $projectname);
+    echo("KNIME Workplace added. Refresh KNIME Workplace view to update it.\n");
+    chdir($oldDir);
+  }
+}
+
+function downloadKNIMEWorkflow($id,$frogDir,$knimeDir) {
+  mkdir("tmp/");
+  $tmpfile = 'tmp/tmp.tmp';
+  if (file_put_contents($tmpfile, file_get_contents('https://app.seolizer.de/knimeRepro/?action=download&id=' . $id))) {
+    echo "File downloaded successfully\n";
+    setupKNIMEWorkflow($frogDir,$knimeDir);
+  } else echo "File downloading failed.\n";
+}
+
+function readKNIMERepro($frogDir,$knimeDir) {
+  $repData = file_get_contents('https://app.seolizer.de/knimeRepro/');
+  $j = json_decode($repData,true);
+  echo("-------------------------------\n");
+  echo("SEOLizer KNIME-Workflow-Repository\n");
+  echo("-------------------------------\n");
+  echo("Nr.\t\tTitle\n");
+  $datList = [];
+  foreach($j as $w) {
+    echo($w["id"] . "\t\t" . $w["title"]."\n");
+    $datList[] = $w;
+  }
+  echo("KNIME-Repro:");
+  $id = trim(fgets(STDIN));
+  if (is_numeric($id)) {
+    if ($id != 0) {
+      $c = 0;
+      foreach($datList as $w) {
+        $c++;
+        if ($w["id"] == $id) {
+          echo("Workflow-Download:\n");
+          echo("Title: " . $w["title"] . "\n");
+          downloadKNIMEWorkflow($id,$frogDir,$knimeDir);
+        }
+      }
+    }
+  }  
+}
+
 function readCrawlData($crawlDir) {
   $data = [];   
   $data['crawlDir'] = $crawlDir;
@@ -53,6 +159,31 @@ function readCrawlData($crawlDir) {
     }
   }
   return $data;
+}
+
+function getCrawlStr($frogDir,$id = '') {
+  $str = '';
+  $crawlList = scandir($frogDir);
+  $datList = [];
+  foreach($crawlList as $crawl) if (substr($crawl,0,1) != '.') $datList[] = readCrawlData($frogDir . $crawl . "/");
+  if ($id == "") {
+    $c = 0;
+    foreach($datList as $crawl) {
+      $c++;
+      echo($c . " " . $crawl["url"] . " - " . $crawl["date"] . "\n");
+    }
+    echo("----------------------------\n");
+    echo("Crawl-Nummer: ");
+    $id = trim(fgets(STDIN));
+  }
+  if ($id != '') {
+    $c = 0;
+    foreach($datList as $crawl) {
+      $c++;
+      if ($c == $id) $str = "jdbc:derby:" . findDerbyDir($crawl["crawlDir"]);
+    }
+  }
+  return $str;
 }
 
 function getCrawls($frogDir,$id = '') {
@@ -125,7 +256,19 @@ function getSFDir() {
   if (file_exists($_SERVER["HOME"] . '/.ScreamingFrogSEOSpider/machine-id.txt')) {
     $dir = $_SERVER["HOME"] . '/.ScreamingFrogSEOSpider';
   } else {
-    echo('Could not determine the directory. Please enter it manually: ');
+    echo('Could not determine the Screaming Frog directory. Please enter it manually: ');
+    $dir = trim(fgets(STDIN));
+    echo("\n");
+  }
+  return $dir;
+}
+
+function getKNIMEDir() {
+  $dir = '';
+  if (file_exists($_SERVER["HOME"] . '/knime-workspace/.metadata/version.ini')) {
+    $dir = $_SERVER["HOME"] . '/knime-workspace';
+  } else { 
+    echo('Could not determine the KNIME Workplace directory. Please enter it manually: ');
     $dir = trim(fgets(STDIN));
     echo("\n");
   }
@@ -164,6 +307,7 @@ function showLicence($dir) {
 $config = readConfig();
 if ($config['sf_workdir'] == '') {
   $config['sf_workdir'] = getSFDir();
+  $config['knime_workdir'] = getKNIMEDir();
   saveConfig($config);
 }
 
@@ -184,6 +328,7 @@ if ($command == '') {
       case 'help': printHelp(); break;
       case 'getdata': getCrawls($config['sf_workdir'] . '/ProjectInstanceData/'); break;
       case 'export': exportCrawls($config['sf_workdir'] . '/ProjectInstanceData/'); break;
+      case 'knime': readKNIMERepro($config['sf_workdir'] . '/ProjectInstanceData/',$config['knime_workdir']); break;
       case 'licence': showlicence($config['sf_workdir']); break;
     }
   } while (($command != "quit") && ($command != "exit") && ($command != "q"));

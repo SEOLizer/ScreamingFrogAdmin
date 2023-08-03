@@ -11,6 +11,77 @@ function escapeFilename($filename) {
   return $filename;
 }
 
+function findDerbyDBString($dir) {
+  $conf = file_get_contents($dir . "/.metadata/.plugins/org.eclipse.core.runtime/.settings/org.knime.database.prefs");
+  $lines = explode("\n",$conf);
+  $pathlist = [];
+  foreach($lines as $line) {
+    $data = explode("=",$line);
+    $dp = explode("/",$data[0]);
+    if ($dp[2] == 'paths') $pathlist[] = $data[0];
+  }
+  $derbyfound = false;
+  $derbypath = '';
+  $id = '';
+  foreach($lines as $line) {
+    $data = explode("=",$line);
+    if (in_array($data[0],$pathlist)) {
+      if (basename($data[1]) == 'derby.jar') {
+	$derbyfound = true;
+	$dp = explode("/",$data[0]);
+	$id = $dp[1];
+        $derbypath = $data[1];
+      }
+    }
+  }
+  return $id;
+}
+
+function addDerbySettings($knime_workDir,$driver_dir) {
+  $id = 'derby';
+  $d  = "drivers/" . $id . "/database_type=default\n";
+  $d .= "drivers/" . $id . "/description=\n";
+  $d .= "drivers/" . $id . "/driver_class=org.apache.derby.iapi.jdbc.AutoloadedDriver\n";
+  $d .= "drivers/" . $id . "/paths/0=" . $driver_dir . "\n";
+  $d .= "drivers/" . $id . "/url_template=jdbc\:<protocol>\://<host>\:<port>/<database>\n";
+  $d .= "drivers/" . $id . "/version=10.16.0\n";
+  $d .= "eclipse.preferences.version=1\n";
+  file_put_contents($knime_workDir . "/.metadata/.plugins/org.eclipse.core.runtime/.settings/org.knime.database.prefs",$d,FILE_APPEND);
+  echo($knime_workDir . "/.metadata/.plugins/org.eclipse.core.runtime/.settings/org.knime.database.prefs\n");
+  echo("Derby-Driver installed. Make sure you restart KNIME\n");
+}
+
+function installDerby($knime_workDir) {
+  mkdir("db-driver/");
+  $tmpfile = 'db-driver/tmp.tmp';
+  $url = 'https://dlcdn.apache.org//db/derby/db-derby-10.16.1.1/db-derby-10.16.1.1-bin.zip';
+  if (file_put_contents($tmpfile, file_get_contents($url))) {
+    echo "File downloaded successfully\n";
+    $dir = 'derby';
+    $oldDir = getcwd();
+    chdir("db-driver");
+    shell_exec("unzip tmp.tmp -d " . $dir . "/");
+    unlink("tmp.tmp");
+    chdir('..');    
+    $ddir = $_SERVER["HOME"] . '/ScreamingFrogAdmin/db-driver/derby/db-derby-10.16.1.1-bin/lib/derby.jar';
+    addDerbySettings($knime_workDir,$ddir);
+  } else echo "File downloading failed.\n";  
+}
+
+function checkDerbyDriver($dir,$installOnly = false) {
+  echo("Check Derby-Driver...\n");
+  $id = findDerbyDBString($dir);
+  if ($id == '') {
+    echo("Derby-Driver not found. Do you want to install it now? (Y/n)");
+    $a = trim(fgets(STDIN));
+    if (($a == '') || ($a == 'Y')) installDerby($dir);
+  } else {
+    echo("Derby-Driver already installed.\n");
+  }
+  if (!$installOnly)
+    return $id;
+}
+
 function rrmdir($dir) {
    if (is_dir($dir)) {
      $objects = scandir($dir);
@@ -78,6 +149,14 @@ function setupKNIMEWorkflow($frogDir,$knimeDir) {
         $var['value'] = getCrawlStr($frogDir);
 	$var['changes'] = escapeFilename($line[2]);
         $setupvars[] = $var;
+      } else if ($line[1] == 'dblookup/derby') {
+	$var = [];
+        $var['name'] = $e[0];
+        $var['var'] = $e[1];
+        $var['value'] = checkDerbyDriver($knimeDir);
+        $var['changes'] = escapeFilename($line[2]);
+        $setupvars[] = $var;
+        checkDerbyDriver($dir);
       } else {
 	$var = [];
         $var['name'] = $e[0];
@@ -287,11 +366,12 @@ function readConfig() {
 
 function printHelp() {
   echo("Commands:\n\n");
-  echo("getdata = List crawls and return crawl-meta-data\n\n");
-  echo("export = Export and remove crawl\n\n");
-  echo("licence = list licence informationen\n\n");
-  echo("help = Print this help\n\n");
-  echo("quit, exit or q = exit\n\n");
+  echo("derby = Check Derby-DB-Driver and/or install driver\n");
+  echo("getdata = List crawls and return crawl-meta-data\n");
+  echo("export = Export and remove crawl\n");
+  echo("licence = list licence informationen\n");
+  echo("help = Print this help\n");
+  echo("quit, exit or q = exit\n");
 }
 
 function showLicence($dir) {
@@ -313,7 +393,7 @@ if ($config['sf_workdir'] == '') {
 
 $command = $argv[1];
 echo("-----------------------------------\n");
-echo("Screaming Frog Admin V1.0\n");
+echo("Screaming Frog Admin V1.1\n");
 echo("-----------------------------------\n");
 if (!checkSpiderConfig($config['sf_workdir'])) {
   echo("Screaming Frog not in db mode. Make sure you use the Screamin Frog in DB Store mode.\n");
@@ -330,6 +410,7 @@ if ($command == '') {
       case 'export': exportCrawls($config['sf_workdir'] . '/ProjectInstanceData/'); break;
       case 'knime': readKNIMERepro($config['sf_workdir'] . '/ProjectInstanceData/',$config['knime_workdir']); break;
       case 'licence': showlicence($config['sf_workdir']); break;
+      case 'derby': echo(checkDerbyDriver($config['knime_workdir'],true)); break;
     }
   } while (($command != "quit") && ($command != "exit") && ($command != "q"));
 } else {
@@ -338,6 +419,7 @@ if ($command == '') {
       case 'getdata': getCrawls($config['sf_workdir'] . '/ProjectInstanceData/',$argv[2]); break;
       case 'export': exportCrawls($config['sf_workdir'] . '/ProjectInstanceData/',$argv[2]); break;
       case 'licence': showlicence($config['sf_workdir']); break;
+      case 'derby': echo(checkDerbyDriver($config['knime_workdir'],true)); break;
   }
 }
 

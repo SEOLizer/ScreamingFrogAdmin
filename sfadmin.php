@@ -410,7 +410,7 @@ if ($command == '') {
       case 'export': exportCrawls($config['sf_workdir'] . '/ProjectInstanceData/'); break;
       case 'knime': readKNIMERepro($config['sf_workdir'] . '/ProjectInstanceData/',$config['knime_workdir']); break;
       case 'licence': showlicence($config['sf_workdir']); break;
-      case 'derby': echo(checkDerbyDriver($config['knime_workdir'],true)); break;
+      case 'install derby': echo(checkDerbyDriver($config['knime_workdir'],true)); break;
     }
   } while (($command != "quit") && ($command != "exit") && ($command != "q"));
 } else {
@@ -419,7 +419,7 @@ if ($command == '') {
       case 'getdata': getCrawls($config['sf_workdir'] . '/ProjectInstanceData/',$argv[2]); break;
       case 'export': exportCrawls($config['sf_workdir'] . '/ProjectInstanceData/',$argv[2]); break;
       case 'licence': showlicence($config['sf_workdir']); break;
-      case 'derby': echo(checkDerbyDriver($config['knime_workdir'],true)); break;
+      case 'install derby': echo(checkDerbyDriver($config['knime_workdir'],true)); break;
   }
 }
 
